@@ -2,7 +2,7 @@
  * app.js — 前端純 JS 聊天室邏輯（無框架）
  * ---------------------------------------------------------
  * 
- * 修改日期：2025-12-01
+ * 修改日期：2025-12-04
  * 修改內容：
  *   - 將機器人回覆從純文字改為 HTML 渲染
  *   - 使用 innerHTML 取代 innerText 以支援格式化內容
@@ -10,6 +10,7 @@
  *   - 保留使用者訊息為純文字（安全考量）
  *   - ★ 新增 markdownToHTML 函式，支援 Markdown 語法轉換
  *   - ★ 修正：加入 Markdown 表格（table）解析功能
+ *   - ★ 新增：removeQuestionMarks 函式，移除問號並自動換行
  * 
  * ---------------------------------------------------------
  * 功能重點：
@@ -20,6 +21,7 @@
  * 5) 當回傳物件為 {} 時，顯示「網路不穩定，請再試一次」
  * 6) 機器人回覆支援 HTML 格式渲染
  * 7) ★ 新增：支援 Markdown 語法自動轉換為 HTML
+ * 8) ★ 新增：自動移除問號功能（句中問號移除後換行）
  *
  * 支援的 Markdown 語法：
  * - 標題：# H1, ## H2, ### H3, #### H4, ##### H5, ###### H6
@@ -562,13 +564,51 @@ function processReplyContent(text) {
     return '';
   }
 
-  // 先進行 Markdown 轉換
-  let html = markdownToHTML(text);
+  // ★ 新增：處理問號
+  // - 若 ? 在句末（後面是換行或結尾），直接移除
+  // - 若 ? 在句中（後面還有文字），移除 ? 並換行
+  let processed = removeQuestionMarks(text);
+
+  // 進行 Markdown 轉換
+  let html = markdownToHTML(processed);
   
   // 再進行安全清理
   html = sanitizeHTML(html);
   
   return html;
+}
+
+/**
+ * ★ 移除問號功能
+ * - 句末的 ?：直接移除
+ * - 句中的 ?：移除並在該位置換行
+ * 
+ * @param {string} text - 原始文字
+ * @returns {string} 處理後的文字
+ */
+function removeQuestionMarks(text) {
+  if (!text || typeof text !== 'string') {
+    return '';
+  }
+
+  // 處理邏輯：
+  // 1. 句末的 ?（後面是換行、空白+換行、或字串結尾）→ 直接移除
+  // 2. 句中的 ?（後面還有非空白字元）→ 移除 ? 並插入換行
+
+  let result = text;
+
+  // 先處理句末的 ?（後面是換行或結尾）
+  // 匹配 ? 後面接著可選的空白，然後是換行或結尾
+  result = result.replace(/\?[ \t]*(\n|$)/g, '$1');
+
+  // 再處理句中的 ?（後面還有內容）
+  // 匹配 ? 後面接著空白和非換行字元，移除 ? 並換行
+  result = result.replace(/\?[ \t]*/g, '\n');
+
+  // 清理多餘的連續換行（最多保留兩個）
+  result = result.replace(/\n{3,}/g, '\n\n');
+
+  return result;
 }
 
 /**
