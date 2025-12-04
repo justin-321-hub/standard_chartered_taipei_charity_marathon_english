@@ -132,112 +132,160 @@ function parseMarkdownTables(text) {
     return '';
   }
 
-  // 表格的正則表達式：匹配連續的以 | 開頭的行
-  // 表格至少需要：表頭行 + 分隔行 + 至少一行資料（但分隔行後可以沒有資料）
-  const tableRegex = /(?:^|\n)((?:\|[^\n]+\|\s*\n)+)/g;
+  /**
+   * 解析單行表格，取得各欄位內容
+   * @param {string} line - 表格行
+   * @returns {string[]} 欄位陣列
+   */
+  function parseTableRow(line) {
+    // 移除首尾的 | 並分割
+    let trimmed = line.trim();
+    if (trimmed.startsWith('|')) trimmed = trimmed.slice(1);
+    if (trimmed.endsWith('|')) trimmed = trimmed.slice(0, -1);
+    return trimmed.split('|').map(cell => cell.trim());
+  }
 
-  return text.replace(tableRegex, (match, tableBlock) => {
-    const lines = tableBlock.trim().split('\n').filter(line => line.trim());
+  /**
+   * 檢查是否為分隔行（只包含 -、:、| 和空格）
+   * @param {string} line - 要檢查的行
+   * @returns {boolean} 是否為分隔行
+   */
+  function isSeparatorRow(line) {
+    const trimmed = line.trim();
+    // 分隔行格式：|---|---|---| 或 |:---|:---:|---:| 或不帶結尾 |
+    // 必須包含 | 和 -
+    if (!trimmed.includes('|') || !trimmed.includes('-')) {
+      return false;
+    }
+    const cells = parseTableRow(trimmed);
+    // 每個 cell 應該只有 -、: 和空格，且至少要有一個 -
+    return cells.length > 0 && cells.every(cell => /^:?-+:?$/.test(cell.trim()));
+  }
+
+  /**
+   * 檢查是否為表格行（包含 | 且不是空行）
+   * @param {string} line - 要檢查的行
+   * @returns {boolean} 是否為表格行
+   */
+  function isTableRow(line) {
+    const trimmed = line.trim();
+    // 必須包含 | 且有實際內容
+    return trimmed.length > 0 && trimmed.includes('|');
+  }
+
+  /**
+   * 從分隔行解析對齊方式
+   * @param {string} line - 分隔行
+   * @returns {string[]} 對齊方式陣列 ('left' | 'center' | 'right')
+   */
+  function parseAlignment(line) {
+    const cells = parseTableRow(line);
+    return cells.map(cell => {
+      const trimmed = cell.trim();
+      const leftColon = trimmed.startsWith(':');
+      const rightColon = trimmed.endsWith(':');
+      
+      if (leftColon && rightColon) return 'center';
+      if (rightColon) return 'right';
+      return 'left'; // 預設左對齊
+    });
+  }
+
+  // 按行分割文字
+  const lines = text.split('\n');
+  const result = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
     
-    // 至少需要 2 行（表頭 + 分隔線）
-    if (lines.length < 2) {
-      return match;
-    }
-
-    /**
-     * 解析單行表格，取得各欄位內容
-     * @param {string} line - 表格行
-     * @returns {string[]} 欄位陣列
-     */
-    function parseTableRow(line) {
-      // 移除首尾的 | 並分割
-      let trimmed = line.trim();
-      if (trimmed.startsWith('|')) trimmed = trimmed.slice(1);
-      if (trimmed.endsWith('|')) trimmed = trimmed.slice(0, -1);
-      return trimmed.split('|').map(cell => cell.trim());
-    }
-
-    /**
-     * 檢查是否為分隔行（只包含 -、:、| 和空格）
-     * @param {string} line - 要檢查的行
-     * @returns {boolean} 是否為分隔行
-     */
-    function isSeparatorRow(line) {
-      const trimmed = line.trim();
-      // 分隔行格式：|---|---|---| 或 |:---|:---:|---:|
-      return /^\|?[\s\-:\|]+\|?$/.test(trimmed) && trimmed.includes('-');
-    }
-
-    /**
-     * 從分隔行解析對齊方式
-     * @param {string} line - 分隔行
-     * @returns {string[]} 對齊方式陣列 ('left' | 'center' | 'right')
-     */
-    function parseAlignment(line) {
-      const cells = parseTableRow(line);
-      return cells.map(cell => {
-        const trimmed = cell.trim();
-        const leftColon = trimmed.startsWith(':');
-        const rightColon = trimmed.endsWith(':');
-        
-        if (leftColon && rightColon) return 'center';
-        if (rightColon) return 'right';
-        return 'left'; // 預設左對齊
-      });
-    }
-
-    // 找出分隔行的位置
-    let separatorIndex = -1;
-    for (let i = 0; i < lines.length; i++) {
-      if (isSeparatorRow(lines[i])) {
-        separatorIndex = i;
-        break;
+    // 檢查是否可能是表格的開始（包含 |）
+    if (isTableRow(line) && !isSeparatorRow(line)) {
+      // 收集連續的表格行
+      const tableLines = [];
+      let j = i;
+      
+      while (j < lines.length) {
+        const currentLine = lines[j];
+        if (isTableRow(currentLine) || isSeparatorRow(currentLine)) {
+          tableLines.push(currentLine);
+          j++;
+        } else if (currentLine.trim() === '') {
+          // 遇到空行，檢查是否已經有完整表格
+          break;
+        } else {
+          // 遇到非表格行
+          break;
+        }
       }
-    }
 
-    // 如果沒有找到分隔行，不是有效的表格
-    if (separatorIndex === -1 || separatorIndex === 0) {
-      return match;
-    }
+      // 至少需要 2 行（表頭 + 分隔線）
+      if (tableLines.length >= 2) {
+        // 找出分隔行的位置
+        let separatorIndex = -1;
+        for (let k = 0; k < tableLines.length; k++) {
+          if (isSeparatorRow(tableLines[k])) {
+            separatorIndex = k;
+            break;
+          }
+        }
 
-    // 解析對齊方式
-    const alignments = parseAlignment(lines[separatorIndex]);
+        // 如果找到有效的分隔行（且不是第一行）
+        if (separatorIndex > 0) {
+          // 解析對齊方式
+          const alignments = parseAlignment(tableLines[separatorIndex]);
 
-    // 建立 HTML 表格
-    let html = '\n<table class="markdown-table">\n';
+          // 建立 HTML 表格
+          let html = '<table class="markdown-table">\n';
 
-    // 處理表頭（分隔行之前的所有行）
-    html += '<thead>\n';
-    for (let i = 0; i < separatorIndex; i++) {
-      const headerCells = parseTableRow(lines[i]);
-      html += '<tr>\n';
-      headerCells.forEach((cell, index) => {
-        const align = alignments[index] || 'left';
-        html += `<th style="text-align:${align}">${cell}</th>\n`;
-      });
-      html += '</tr>\n';
-    }
-    html += '</thead>\n';
+          // 處理表頭（分隔行之前的所有行）
+          html += '<thead>\n';
+          for (let k = 0; k < separatorIndex; k++) {
+            const headerCells = parseTableRow(tableLines[k]);
+            html += '<tr>\n';
+            headerCells.forEach((cell, index) => {
+              const align = alignments[index] || 'left';
+              html += '<th style="text-align:' + align + '">' + cell + '</th>\n';
+            });
+            html += '</tr>\n';
+          }
+          html += '</thead>\n';
 
-    // 處理表格內容（分隔行之後的所有行）
-    if (separatorIndex < lines.length - 1) {
-      html += '<tbody>\n';
-      for (let i = separatorIndex + 1; i < lines.length; i++) {
-        const rowCells = parseTableRow(lines[i]);
-        html += '<tr>\n';
-        rowCells.forEach((cell, index) => {
-          const align = alignments[index] || 'left';
-          html += `<td style="text-align:${align}">${cell}</td>\n`;
-        });
-        html += '</tr>\n';
+          // 處理表格內容（分隔行之後的所有行）
+          if (separatorIndex < tableLines.length - 1) {
+            html += '<tbody>\n';
+            for (let k = separatorIndex + 1; k < tableLines.length; k++) {
+              const rowCells = parseTableRow(tableLines[k]);
+              html += '<tr>\n';
+              rowCells.forEach((cell, index) => {
+                const align = alignments[index] || 'left';
+                html += '<td style="text-align:' + align + '">' + cell + '</td>\n';
+              });
+              html += '</tr>\n';
+            }
+            html += '</tbody>\n';
+          }
+
+          html += '</table>';
+          result.push(html);
+          i = j;
+          continue;
+        }
       }
-      html += '</tbody>\n';
+      
+      // 不是有效的表格，將收集到的行當作普通文字
+      result.push(line);
+      i++;
+    } else {
+      // 不是表格行，保留原始行
+      result.push(line);
+      i++;
     }
+  }
 
-    html += '</table>\n';
-    return html;
-  });
+  return result.join('\n');
 }
+
 
 /**
  * ★ Markdown 轉 HTML 函式
@@ -760,6 +808,3 @@ messages.push({
   ts: Date.now(),
 });
 render();
-
-
-
