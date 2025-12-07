@@ -1,4 +1,6 @@
-/* 基本排版與色彩 */
+/* =========================================
+   1. 基本變數與排版設定
+   ========================================= */
 :root {
   /* 🎨 背景色 */
   --bg: #81b9f4;              /* 頁面背景色 */
@@ -20,12 +22,12 @@
   --primary-600: #1d4ed8;     /* 主色（hover 狀態） */
 
   /* 🎨 使用者訊息泡泡色 */
-  --bubble-user: #d4d4d4;     /* 使用者泡泡背景 */
-  --bubble-user-text: #ffffff;/* 使用者泡泡文字 */
+  --bubble-user: #d4d4d4;      /* 使用者泡泡背景 */
+  --bubble-user-text: #ffffff; /* 使用者泡泡文字 */
 
   /* 🎨 機器人訊息泡泡色 */
-  --bubble-bot: #ffffff;      /* 機器人泡泡背景 */
-  --bubble-bot-text: #111827; /* 機器人泡泡文字 */
+  --bubble-bot: #ffffff;       /* 機器人泡泡背景 */
+  --bubble-bot-text: #111827;  /* 機器人泡泡文字 */
 }
 
 * { box-sizing: border-box; }
@@ -39,26 +41,29 @@ body {
 /* 公用 */
 .hidden { display: none !important; }
 
-/* 頂部列 */
+/* =========================================
+   2. 頂部列 (Header)
+   ========================================= */
 .topbar {
   position: sticky; top: 0; z-index: 10;
-  height: auto; background: var(--panel); border-bottom: 1px solid var(--border); /*64px*/
+  height: 64px; background: var(--panel); border-bottom: 1px solid var(--border);
   display: flex; align-items: center; gap: 12px; padding: 0 16px;
 }
-/* 取代原本的 .logo 規則 */
+
 .logo {
-  height: 36px;          /* 固定高度 */
-  width: auto;           /* 寬度自動，維持比例 */
-  /*max-width: 67px;       /* 你原先想要的大致寬度上限 */
+  height: 36px;
+  width: auto;
   border-radius: 6px;
   display: block;
-  object-fit: contain;   /* 避免裁切，保持比例 */
+  object-fit: contain;
 }
 
 .brand .title { font-weight: 600; }
 .brand .subtitle { font-size: 12px; color: var(--muted); }
 
-/* 主體與訊息清單 */
+/* =========================================
+   3. 主體與訊息清單
+   ========================================= */
 .main {
   flex: 1;
   display: flex; flex-direction: column; align-items: center;
@@ -72,32 +77,44 @@ body {
   display: flex; flex-direction: column; gap: 12px;
 }
 
-/* 單則訊息 */
+/* 單則訊息容器 */
 .msg { display: flex; align-items: flex-start; gap: 10px; }
 .msg.user { flex-direction: row-reverse; }
+
+/* 頭像 */
 .avatar {
   width: 36px; height: 36px; border-radius: 999px;
   background: #fff; border: 1px solid var(--border); flex-shrink: 0;
 }
 
-/* 泡泡 */
+/* =========================================
+   4. 對話泡泡 (Bubble) 核心樣式
+   ========================================= */
 .bubble {
-  max-width: 78%;
+  max-width: 85%; /* 稍微加寬以容納表格 */
   border: 1px solid var(--border); border-radius: 16px;
   padding: 10px 12px;
   background: var(--bubble-bot); color: var(--bubble-bot-text);
   box-shadow: 0 1px 3px rgba(0,0,0,.05);
   font-size: 14px; line-height: 1.5;
-  white-space: pre-wrap;
+  
+  /* 為了正確顯示 HTML 表格與清單，使用 normal */
+  white-space: normal; 
   word-break: break-word;
 }
+
+/* 使用者泡泡特別處理 */
 .user .bubble {
   background: var(--bubble-user);
   color: var(--bubble-user-text);
   border-color: transparent;
+  /* 使用者輸入仍為純文字，保留換行 */
+  white-space: pre-wrap; 
 }
 
-/* 思考中動畫 */
+/* =========================================
+   5. 思考中動畫 (Thinking)
+   ========================================= */
 .thinking {
   width: 100%; max-width: 820px;
   display: flex; align-items: center; gap: .5rem;
@@ -120,15 +137,9 @@ body {
   40% { transform: scale(1); opacity: 1; }
 }
 
-/* 骨架（可選） */
-.skeleton {
-  background: linear-gradient(90deg, #eee 25%, #f6f6f6 37%, #eee 63%);
-  background-size: 400% 100%; animation: shimmer 1.25s infinite;
-  border-radius: 10px; height: 1.1em; width: 60%;
-}
-@keyframes shimmer { 0% {background-position: 100% 0;} 100% {background-position: -100% 0;} }
-
-/* 輸入列 */
+/* =========================================
+   6. 輸入列 (Composer)
+   ========================================= */
 .composer {
   min-height: 72px;
   height: auto;
@@ -163,13 +174,86 @@ body {
 .btn-outline { background: #f3f4f6; border-color: var(--border); }
 .btn-outline:hover { background: #e9ecf1; }
 
-/* 行動裝置微調 */
-@media (max-width: 480px) {
-  .bubble { max-width: 86%; }
-  .messages { padding: 12px; }
+/* =========================================
+   7. Markdown/HTML 內容樣式優化 (重要！)
+   ========================================= */
+
+/* 連結 */
+.bubble a {
+  color: #2563eb;
+  text-decoration: underline;
+  word-break: break-all;
+}
+.bubble a:hover {
+  color: #1d4ed8;
 }
 
+/* 表格 */
+.bubble table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0;
+  font-size: 0.9em;
+  background-color: #fff;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.bubble th, .bubble td {
+  border: 1px solid #e5e7eb;
+  padding: 8px 10px;
+  text-align: left;
+}
+.bubble th {
+  background-color: #f3f4f6;
+  font-weight: 600;
+  color: #374151;
+}
+.bubble tr:nth-child(even) {
+  background-color: #f9fafb;
+}
 
+/* 清單 (ul, ol) */
+.bubble ul, .bubble ol {
+  margin: 6px 0 6px 24px;
+  padding: 0;
+}
+.bubble li {
+  margin-bottom: 4px;
+}
 
+/* 段落與標題 */
+.bubble p {
+  margin: 0 0 8px 0;
+}
+.bubble p:last-child {
+  margin-bottom: 0;
+}
+.bubble h1, .bubble h2, .bubble h3 {
+  margin: 10px 0 6px 0;
+  font-size: 1.1em;
+  font-weight: bold;
+}
 
+/* 圖片 */
+.bubble img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  margin-top: 8px;
+  display: block;
+}
 
+/* =========================================
+   8. 行動裝置 RWD 微調
+   ========================================= */
+@media (max-width: 480px) {
+  .bubble { max-width: 90%; }
+  .messages { padding: 12px; }
+  
+  /* 手機上表格若太寬可橫向捲動 */
+  .bubble table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+}
