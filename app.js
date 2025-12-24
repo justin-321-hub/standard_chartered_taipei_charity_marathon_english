@@ -1,28 +1,18 @@
 /**
- * app.js — 前端純 JS 聊天室邏輯（渣打馬拉松英文版）
- * ---------------------------------------------------------
- * 功能重點：
- * 1) 機器人回覆支援 HTML/Markdown 渲染 (表格、清單、連結)
- * 2) 使用者輸入保持純文字 (防護 XSS)
- * 3) 錯誤處理與思考中動畫
- * 4) 針對渣打馬拉松的 API 與歡迎詞
+ * app.js — Frontend JS Chat Logic (English Version)
  */
 
 "use strict";
 
 /* =========================
-   後端 API 網域
-   ========================= */
+   Backend API Domain
+========================= */
 const API_BASE = "https://standard-chartered-taipei-charity.onrender.com";
-
-/**
- * 組合完整 API 路徑
- */
 const api = (p) => `${API_BASE}${p}`;
 
 /* =========================
-   免登入多使用者：clientId
-   ========================= */
+   No-login Multi-user: clientId
+========================= */
 const CID_KEY = "fourleaf_client_id";
 let clientId = localStorage.getItem(CID_KEY);
 if (!clientId) {
@@ -33,22 +23,21 @@ if (!clientId) {
 }
 
 /* =========================
-   DOM 參照
-   ========================= */
+   DOM References
+========================= */
 const elMessages = document.getElementById("messages");
 const elInput = document.getElementById("txtInput");
 const elBtnSend = document.getElementById("btnSend");
 const elThinking = document.getElementById("thinking");
 
 /* =========================
-   訊息狀態
-   ========================= */
-/** @type {{id:string, role:'user'|'assistant', text:string, ts:number, isHtml?:boolean}[]} */
+   Message State
+========================= */
 const messages = [];
 
 /* =========================
-   小工具函式
-   ========================= */
+   Utilities
+========================= */
 const uid = () => Math.random().toString(36).slice(2);
 
 function scrollToBottom() {
@@ -56,216 +45,8 @@ function scrollToBottom() {
 }
 
 /**
- * ★ 解析 Markdown 表格
+ * Toggle "thinking" animation
  */
-function parseMarkdownTables(text) {
-  if (!text || typeof text !== 'string') return '';
-
-  const tableRegex = /(?:^|\n)((?:\|[^\n]+\|\s*\n)+)/g;
-
-  return text.replace(tableRegex, (match, tableBlock) => {
-    const lines = tableBlock.trim().split('\n').filter(line => line.trim());
-    if (lines.length < 2) return match;
-
-    function parseTableRow(line) {
-      let trimmed = line.trim();
-      if (trimmed.startsWith('|')) trimmed = trimmed.slice(1);
-      if (trimmed.endsWith('|')) trimmed = trimmed.slice(0, -1);
-      return trimmed.split('|').map(cell => cell.trim());
-    }
-
-    function isSeparatorRow(line) {
-      const trimmed = line.trim();
-      return /^\|?[\s\-:\|]+\|?$/.test(trimmed) && trimmed.includes('-');
-    }
-
-    function parseAlignment(line) {
-      const cells = parseTableRow(line);
-      return cells.map(cell => {
-        const trimmed = cell.trim();
-        const leftColon = trimmed.startsWith(':');
-        const rightColon = trimmed.endsWith(':');
-        if (leftColon && rightColon) return 'center';
-        if (rightColon) return 'right';
-        return 'left';
-      });
-    }
-
-    let separatorIndex = -1;
-    for (let i = 0; i < lines.length; i++) {
-      if (isSeparatorRow(lines[i])) {
-        separatorIndex = i;
-        break;
-      }
-    }
-
-    if (separatorIndex === -1 || separatorIndex === 0) return match;
-
-    const alignments = parseAlignment(lines[separatorIndex]);
-    let html = '\n<table class="markdown-table">\n<thead>\n';
-
-    // 表頭
-    for (let i = 0; i < separatorIndex; i++) {
-      const headerCells = parseTableRow(lines[i]);
-      html += '<tr>\n';
-      headerCells.forEach((cell, index) => {
-        const align = alignments[index] || 'left';
-        html += `<th style="text-align:${align}">${cell}</th>\n`;
-      });
-      html += '</tr>\n';
-    }
-    html += '</thead>\n';
-
-    // 表身
-    if (separatorIndex < lines.length - 1) {
-      html += '<tbody>\n';
-      for (let i = separatorIndex + 1; i < lines.length; i++) {
-        const rowCells = parseTableRow(lines[i]);
-        html += '<tr>\n';
-        rowCells.forEach((cell, index) => {
-          const align = alignments[index] || 'left';
-          html += `<td style="text-align:${align}">${cell}</td>\n`;
-        });
-        html += '</tr>\n';
-      }
-      html += '</tbody>\n';
-    }
-
-    html += '</table>\n';
-    return html;
-  });
-}
-
-/**
- * ★ Markdown 轉 HTML
- */
-function markdownToHTML(markdown) {
-  if (!markdown || typeof markdown !== 'string') return '';
-
-  let html = markdown;
-
-  // 1. 保護程式碼區塊
-  const codeBlocks = [];
-  html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, (match, lang, code) => {
-    const index = codeBlocks.length;
-    const escapedCode = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').trim();
-    const langClass = lang ? ` class="language-${lang}"` : '';
-    codeBlocks.push(`<pre><code${langClass}>${escapedCode}</code></pre>`);
-    return `%%CODEBLOCK_${index}%%`;
-  });
-
-  const inlineCodes = [];
-  html = html.replace(/`([^`]+)`/g, (match, code) => {
-    const index = inlineCodes.length;
-    const escapedCode = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    inlineCodes.push(`<code>${escapedCode}</code>`);
-    return `%%INLINECODE_${index}%%`;
-  });
-
-  // 2. 處理表格
-  html = parseMarkdownTables(html);
-
-  // 3. 區塊元素
-  html = html.replace(/^[\s]*[-*_]{3,}[\s]*$/gm, '<hr>'); // 分隔線
-  
-  // 標題
-  html = html.replace(/^###### (.+)$/gm, '<h6>$1</h6>');
-  html = html.replace(/^##### (.+)$/gm, '<h5>$1</h5>');
-  html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
-  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
-  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-
-  // 引用
-  html = html.replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>');
-  html = html.replace(/<\/blockquote>\n<blockquote>/g, '\n');
-
-  // 清單
-  html = html.replace(/^[\s]*[-*+] ([^\n]+)$/gm, (match, content) => {
-    if (/^[-:\s|]+$/.test(content)) return match; // 避開表格分隔線
-    return `<li>${content}</li>`;
-  });
-  html = html.replace(/^[\s]*\d+\. (.+)$/gm, '<li>$1</li>');
-  html = html.replace(/(<li>[^<]*<\/li>\n?)+/g, (match) => `<ul>${match}</ul>`);
-
-  // 4. 行內元素
-  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" style="max-width:100%;">');
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  html = html.replace(/__(.+?)__/g, '<strong>$1</strong>');
-  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-  html = html.replace(/_(.+?)_/g, '<em>$1</em>');
-  html = html.replace(/~~(.+?)~~/g, '<del>$1</del>');
-
-  // 5. 換行
-  html = html.replace(/  \n/g, '<br>\n');
-  html = html.replace(/([^>\n])\n([^<\n])/g, '$1<br>\n$2');
-
-  // 6. 還原程式碼
-  inlineCodes.forEach((code, index) => html = html.replace(`%%INLINECODE_${index}%%`, code));
-  codeBlocks.forEach((block, index) => html = html.replace(`%%CODEBLOCK_${index}%%`, block));
-
-  return html;
-}
-
-/**
- * HTML 基本清理 (XSS 防護)
- */
-function sanitizeHTML(html) {
-  const allowedTags = [
-    'b', 'i', 'u', 'strong', 'em', 'del', 'br', 'p', 'div', 'span',
-    'ul', 'ol', 'li', 'a', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-    'table', 'thead', 'tbody', 'tr', 'td', 'th',
-    'blockquote', 'code', 'pre', 'hr', 'img'
-  ];
-  const allowedAttributes = {
-    'a': ['href', 'target', 'rel'],
-    'img': ['src', 'alt', 'style', 'width', 'height'],
-    '*': ['class', 'style', 'colspan', 'rowspan']
-  };
-
-  const temp = document.createElement('div');
-  temp.innerHTML = html;
-
-  function cleanNode(node) {
-    const children = Array.from(node.childNodes);
-    for (const child of children) {
-      if (child.nodeType === Node.ELEMENT_NODE) {
-        const tagName = child.tagName.toLowerCase();
-        if (!allowedTags.includes(tagName)) {
-          const textNode = document.createTextNode(child.textContent || '');
-          node.replaceChild(textNode, child);
-        } else {
-          const attrs = Array.from(child.attributes);
-          for (const attr of attrs) {
-            const name = attr.name.toLowerCase();
-            const val = attr.value.toLowerCase();
-            if (name.startsWith('on') || val.startsWith('javascript:') || (name === 'src' && val.startsWith('data:') && !val.startsWith('data:image/'))) {
-              child.removeAttribute(attr.name);
-              continue;
-            }
-          }
-          cleanNode(child);
-        }
-      }
-    }
-  }
-  cleanNode(temp);
-  return temp.innerHTML;
-}
-
-function escapeHTML(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
-
-function processReplyContent(text) {
-  if (!text || typeof text !== 'string') return '';
-  let html = markdownToHTML(text);
-  return sanitizeHTML(html);
-}
-
 function setThinking(on) {
   if (!elThinking) return;
   if (on) {
@@ -280,34 +61,65 @@ function setThinking(on) {
   }
 }
 
+/**
+ * Smart question mark processing (for user input)
+ */
+function processQuestionMarks(text) {
+  let result = text;
+  result = result.replace(/[?？]\s*$/g, '');
+  result = result.replace(/[?？](?=.)/g, '\n');
+  result = result.replace(/\n\s*\n/g, '\n');
+  return result.trim();
+}
+
+/**
+ * HTML escaping (prevent XSS)
+ */
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+/**
+ * Check if response contains incomplete processing markers
+ */
+function containsIncompleteMarkers(text) {
+  if (typeof text !== 'string') return false;
+  const lowerText = text.toLowerCase();
+  return lowerText.includes('search results') && lowerText.includes('html');
+}
+
 /* =========================
-   渲染邏輯
-   ========================= */
+   Render messages to screen
+========================= */
 function render() {
   if (!elMessages) return;
   elMessages.innerHTML = "";
-
   for (const m of messages) {
     const isUser = m.role === "user";
+    // Row container
     const row = document.createElement("div");
     row.className = `msg ${isUser ? "user" : "bot"}`;
 
+    // Avatar
     const avatar = document.createElement("img");
     avatar.className = "avatar";
     avatar.src = isUser
       ? "https://raw.githubusercontent.com/justin-321-hub/standard_chartered_taipei_charity_marathon/refs/heads/main/assets/user.png"
-      : "https://raw.githubusercontent.com/justin-321-hub/standard_chartered_taipei_charity_marathon/refs/heads/main/assets/S__53714948.png";
+      : "https://raw.githubusercontent.com/justin-321-hub/standard_chartered_taipei_charity_marathon/refs/heads/main/assets/20251224_logo.jpg";
     avatar.alt = isUser ? "you" : "bot";
 
+    // Message bubble
     const bubble = document.createElement("div");
     bubble.className = "bubble";
-
     if (isUser) {
-      bubble.innerHTML = escapeHTML(m.text);
+      bubble.innerHTML = escapeHtml(m.text).replace(/\n/g, '<br>');
     } else {
-      bubble.innerHTML = processReplyContent(m.text);
+      bubble.innerHTML = m.text;
     }
 
+    // Assembly
     row.appendChild(avatar);
     row.appendChild(bubble);
     elMessages.appendChild(row);
@@ -316,16 +128,33 @@ function render() {
 }
 
 /* =========================
-   送出訊息邏輯
-   ========================= */
-async function sendText(text) {
+   Call backend logic (independent error counters)
+========================= */
+async function sendText(text, retryCounts = {}) {
   const content = (text ?? elInput?.value ?? "").trim();
   if (!content) return;
 
-  const userMsg = { id: uid(), role: "user", text: content, ts: Date.now(), isHtml: false };
-  messages.push(userMsg);
-  if (elInput) elInput.value = "";
-  render();
+  const contentToSend = processQuestionMarks(content);
+
+  // Initialize retry counters
+  if (!retryCounts.emptyResponse) retryCounts.emptyResponse = 0;
+  if (!retryCounts.incompleteMarkers) retryCounts.incompleteMarkers = 0;
+  if (!retryCounts.httpErrors) retryCounts.httpErrors = 0;
+
+  // Check if this is the first request
+  const isFirstRequest = 
+    retryCounts.emptyResponse === 0 && 
+    retryCounts.incompleteMarkers === 0 && 
+    retryCounts.httpErrors === 0;
+
+  // Only show user message and clear input on first call
+  if (isFirstRequest) {
+    const userMsg = { id: uid(), role: "user", text: content, ts: Date.now() };
+    messages.push(userMsg);
+    if (elInput) elInput.value = "";
+    render();
+  }
+
   setThinking(true);
 
   try {
@@ -335,54 +164,182 @@ async function sendText(text) {
         "Content-Type": "application/json",
         "X-Client-Id": clientId,
       },
-      body: JSON.stringify({ 
-        text: content, 
-        clientId, 
-        language: "英文", // 修改：將語言設定為英文
-        role:"user"
+      body: JSON.stringify({
+        text: contentToSend,
+        clientId,
+        language: "繁體中文",
+        role: "user"
       }),
     });
 
     const raw = await res.text();
     let data;
+    
+    // Simplified JSON parsing, wrap as errorRaw on failure
     try {
       data = raw ? JSON.parse(raw) : {};
     } catch {
       data = { errorRaw: raw };
     }
 
-    if (!res.ok) {
-      if (res.status === 502 || res.status === 404) throw new Error("Network unstable, please try again!"); // 修改：英文錯誤訊息
-      const serverMsg = (data && (data.error || data.body || data.message)) ?? raw ?? "unknown error";
-      throw new Error(`HTTP ${res.status} ${res.statusText} — ${serverMsg}`);
+    // ★★★ 3. HTTP 500/502/503/504/401/404 Error Handling ★★★
+    const commonHttpErrors = [500, 502, 503, 504, 401, 404];
+    if (commonHttpErrors.includes(res.status)) {
+      if (retryCounts.httpErrors === 0) {
+        retryCounts.httpErrors++;
+        setThinking(false);
+        const retryMsg = {
+          id: uid(),
+          role: "assistant",
+          text: "The network is unstable， we are asking your question again.",
+          ts: Date.now(),
+        };
+        messages.push(retryMsg);
+        render();
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return sendText(content, retryCounts);
+      } else {
+        throw new Error("Sorry, the network is unstable. Please try again later.");
+      }
     }
 
+    // ★★★ 4. Other HTTP Errors ★★★
+    if (!res.ok) {
+      throw new Error("Sorry, the network is unstable. Please try again later.");
+    }
+
+    // ★★★ 1. HTTP 200 Empty Response Error Handling ★★★
+    if (res.status === 200) {
+      let isEmptyResponse = false;
+      
+      if (typeof data === "object" && data !== null) {
+        const isPlainEmptyObject =
+          !Array.isArray(data) &&
+          Object.keys(data).filter(k => k !== 'clientId').length === 0;
+        
+        const hasTextField = 'text' in data || 'message' in data;
+        if (hasTextField) {
+          const textValue = data.text !== undefined ? data.text : data.message;
+          if (textValue === "" || textValue === null || textValue === undefined) {
+            isEmptyResponse = true;
+          }
+        } else if (isPlainEmptyObject) {
+          isEmptyResponse = true;
+        }
+      }
+
+      if (isEmptyResponse && retryCounts.emptyResponse === 0) {
+        retryCounts.emptyResponse++;
+        setThinking(false);
+        const retryMsg = {
+          id: uid(),
+          role: "assistant",
+          text: "The network is unstable， we are asking your question again.",
+          ts: Date.now(),
+        };
+        messages.push(retryMsg);
+        render();
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return sendText(content, retryCounts);
+      }
+      
+      if (isEmptyResponse && retryCounts.emptyResponse >= 1) {
+        throw new Error("Sorry, the network is unstable. Please try again later.");
+      }
+    }
+
+    // Process reply text (HTML)
     let replyText;
     if (typeof data === "string") {
-      replyText = data.trim() || "(Empty response)"; // 修改：英文空白回覆提示
-    } else if (data && (data.text || data.message)) {
-      replyText = String(data.text || data.message);
+      replyText = data.trim() || "Please rephrase your question, thank you.";
+    } else if (data && typeof data === "object") {
+      const hasTextField = 'text' in data || 'message' in data;
+      if (hasTextField) {
+        const textValue = data.text !== undefined ? data.text : data.message;
+        if (textValue === "" || textValue === null || textValue === undefined) {
+          replyText = "Please rephrase your question, thank you.";
+        } else {
+          replyText = String(textValue).trim() || "Please rephrase your question, thank you.";
+        }
+      } else {
+        const isPlainEmptyObject =
+          !Array.isArray(data) &&
+          Object.keys(data).filter(k => k !== 'clientId').length === 0;
+        if (isPlainEmptyObject) {
+          replyText = "The network is unstable, please try again later.";
+        } else {
+          replyText = JSON.stringify(data, null, 2);
+        }
+      }
     } else {
-      const isPlainEmptyObject = data && typeof data === "object" && !Array.isArray(data) && Object.keys(data).length === 0;
-      replyText = isPlainEmptyObject ? "Network unstable, please try again" : JSON.stringify(data, null, 2); // 修改：英文錯誤訊息
+      replyText = "Please rephrase your question, thank you.";
     }
 
-    const botMsg = { id: uid(), role: "assistant", text: replyText, ts: Date.now(), isHtml: true };
+    // ★★★ 2. Backend Incomplete Processing Error ★★★
+    if (containsIncompleteMarkers(replyText)) {
+      if (retryCounts.incompleteMarkers === 0) {
+        retryCounts.incompleteMarkers++;
+        setThinking(false);
+        const thinkingMsg = {
+          id: uid(),
+          role: "assistant",
+          text: "Still searching, please wait.",
+          ts: Date.now(),
+        };
+        messages.push(thinkingMsg);
+        render();
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        return sendText(content, retryCounts);
+      } else {
+        // Second failure, show error message and return
+        setThinking(false);
+        const errorMsg = {
+          id: uid(),
+          role: "assistant",
+          text: "Sorry, the network is unstable. Please try again later.",
+          ts: Date.now(),
+        };
+        messages.push(errorMsg);
+        render();
+        return;
+      }
+    }
+
+    // Push bot message
+    const botMsg = { id: uid(), role: "assistant", text: replyText, ts: Date.now() };
     messages.push(botMsg);
     setThinking(false);
     render();
 
   } catch (err) {
     setThinking(false);
-    // 修改：英文離線提示
-    const friendly = (!navigator.onLine && "You are currently offline. Please check your network connection and try again.") || `${err?.message || err}`;
-    const botErr = { id: uid(), role: "assistant", text: friendly, ts: Date.now(), isHtml: true };
+    
+    // ★★★ 5. Offline Status Check ★★★
+    if (!navigator.onLine) {
+      const offlineMsg = {
+        id: uid(),
+        role: "assistant",
+        text: "You are currently offline. Please check your network connection and try again.",
+        ts: Date.now(),
+      };
+      messages.push(offlineMsg);
+      render();
+      return;
+    }
+    
+    const friendly = `${err?.message || err}`;
+    const botErr = {
+      id: uid(),
+      role: "assistant",
+      text: friendly,
+      ts: Date.now(),
+    };
     messages.push(botErr);
     render();
   }
 }
 
-// 事件綁定
+// Event bindings
 elBtnSend?.addEventListener("click", () => sendText());
 elInput?.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
@@ -390,14 +347,17 @@ elInput?.addEventListener("keydown", (e) => {
     sendText();
   }
 });
+
 window.addEventListener("load", () => elInput?.focus());
 
-// 歡迎訊息 (英文)
+// Welcome message
 messages.push({
   id: uid(),
   role: "assistant",
-  text: "Hi, I am **Sky**. I love running, I am passionate about charity and full of positive energy. I know every detail of the event inside out and hope to use my expertise to meet your service needs.\n\nIf you have any questions about the **Standard Chartered Taipei Charity Marathon**, feel free to ask me!",
+  text: "<p>Hi~~</p><p>I am<strong>Standard Chartered Marathon's</strong>online customer service assistant.What information do you need to inquire about?</p><p>Feel free to ask questions!</p>",
   ts: Date.now(),
-  isHtml: true
 });
 render();
+
+
+
