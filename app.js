@@ -354,10 +354,11 @@ window.addEventListener("load", () => elInput?.focus());
 messages.push({
   id: uid(),
   role: "assistant",
-  text: "<p>Hi~~</p><p>I am<strong>Standard Chartered Marathon's</strong>online customer service assistant.What information do you need to inquire about?</p><p>Feel free to ask questions!</p>",
+  text: "<p>Hi~~</p><p>I am <strong>Standard Chartered Marathon's</strong> online customer service assistant.What information do you need to inquire about?</p><p>Feel free to ask questions!</p>",
   ts: Date.now(),
 });
 render();
+
 
 
 
